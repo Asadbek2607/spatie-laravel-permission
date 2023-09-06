@@ -20,6 +20,8 @@ class UserController extends Controller
          $this->middleware('permission:user-edit', ['only' => ['edit','update']]);
          $this->middleware('permission:user-delete', ['only' => ['destroy']]);
     }
+
+    // show all users
     public function index(Request $request): View
     {
         $data = User::latest()->paginate(5);
@@ -28,38 +30,44 @@ class UserController extends Controller
             ->with('i', ($request->input('page', 1) - 1) * 5);
     }
 
+    // create the user
     public function create(): View
     {
+        // get all roles from db
         $roles = Role::pluck('name','name')->all();
-        return view('users.create',compact('roles'));
+
+        // set default role
+        $defaultRoles = ['Default'];
+        return view('users.create',compact('roles', 'defaultRoles'));
     }
 
+    // store the user in the database
     public function store(Request $request): RedirectResponse
-
     {
         $this->validate($request, [
             'name' => 'required',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|same:confirm-password',
-            'roles' => 'required'
         ]);
 
         $input = $request->all();
         $input['password'] = Hash::make($input['password']);
 
         $user = User::create($input);
-        $user->assignRole($request->input('roles'));
-
+        $defaultRole = Role::where('name', 'Default')->first();
+        $user->assignRole($defaultRole);
         return redirect()->route('users.index')
                         ->with('success','User created successfully');
     }
 
+    // show the user
     public function show(User $user): View
     {
         $user = User::find($user->id);
         return view('users.show',compact('user'));
     }
 
+    // edit the user
     public function edit(User $user): View
     {
         $user = User::find($user->id);
@@ -69,27 +77,41 @@ class UserController extends Controller
         return view('users.edit',compact('user','roles','userRole'));
     }
 
+    // update the user
     public function update(Request $request, $id): RedirectResponse
     {
         $this->validate($request, [
             'name' => 'required',
             'email' => 'required|email|unique:users,email,'.$id,
-            'password' => 'same:confirm-password',
+            'password' => 'sometimes|same:confirm-password', // Use 'sometimes' to allow optional password update
             'roles' => 'required'
         ]);
 
         $input = $request->all();
 
         $user = User::find($id);
-        $user->update($input);
-        FacadesDB::table('model_has_roles')->where('model_id',$id)->delete();
 
+        // Hash the password if it's included in the request
+        if (!empty($input['password'])) {
+            $input['password'] = Hash::make($input['password']);
+        } else {
+            // If the password field is empty, remove it from the input to avoid overwriting with a null value
+            unset($input['password']);
+        }
+
+        $user->update($input);
+
+        // Remove existing role assignments
+        FacadesDB::table('model_has_roles')->where('model_id', $id)->delete();
+
+        // Assign new roles based on the request input
         $user->assignRole($request->input('roles'));
 
         return redirect()->route('users.index')
-                        ->with('success','User updated successfully');
+            ->with('success', 'User updated successfully');
     }
 
+    // delete the user from the database.
     public function destroy($id): RedirectResponse
     {
         User::find($id)->delete();
